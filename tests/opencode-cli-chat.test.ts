@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import fs from "node:fs";
-import { handleOpencodeEvent } from "../src/opencode-cli-chat";
+import { buildOpencodeArgs, handleOpencodeEvent } from "../src/opencode-cli-chat";
 import type { AgentStreamEvent } from "../src/agent-chat";
 
 function runEvent(raw: unknown) {
@@ -65,4 +65,88 @@ test("synthetic OpenCode text and tool events are normalized", () => {
     name: "read_file",
   });
   expect(textOutcome.texts).toEqual(["hello from opencode"]);
+});
+
+test("OpenCode args include model, permissions, cwd, and resume session when configured", () => {
+  const previousModel = process.env.RAINDROP_WORKSHOP_OPENCODE_MODEL;
+  const previousSkip = process.env.RAINDROP_WORKSHOP_OPENCODE_SKIP_PERMISSIONS;
+  process.env.RAINDROP_WORKSHOP_OPENCODE_MODEL = "opencode/big-pickle";
+  process.env.RAINDROP_WORKSHOP_OPENCODE_SKIP_PERMISSIONS = "1";
+  try {
+    expect(buildOpencodeArgs({
+      backendUrl: "http://localhost:5899",
+      content: "hello",
+      cwd: "/tmp/project",
+      runId: null,
+      resumeSessionId: "ses_demo",
+    })).toEqual([
+      "run",
+      "--format",
+      "json",
+      "--dir",
+      "/tmp/project",
+      "--dangerously-skip-permissions",
+      "--model",
+      "opencode/big-pickle",
+      "--session",
+      "ses_demo",
+      "hello",
+    ]);
+  } finally {
+    if (previousModel === undefined) delete process.env.RAINDROP_WORKSHOP_OPENCODE_MODEL;
+    else process.env.RAINDROP_WORKSHOP_OPENCODE_MODEL = previousModel;
+    if (previousSkip === undefined) delete process.env.RAINDROP_WORKSHOP_OPENCODE_SKIP_PERMISSIONS;
+    else process.env.RAINDROP_WORKSHOP_OPENCODE_SKIP_PERMISSIONS = previousSkip;
+  }
+});
+
+test("OpenCode status, thinking, and tool-finish events are normalized", () => {
+  const seenEvents = new Set<string>();
+  const emitted: AgentStreamEvent[] = [];
+  const statuses: string[] = [];
+  const state = {
+    content: "",
+    providerSessionId: "ses_demo",
+    seenEvents,
+    onProviderSession() {},
+    onText() {},
+    onStatus(status: string) {
+      statuses.push(status);
+    },
+    onError() {},
+    emit(event: AgentStreamEvent) {
+      emitted.push(event);
+    },
+  };
+
+  handleOpencodeEvent({
+    type: "session.status",
+    sessionID: "ses_demo",
+    status: "planning",
+  }, state);
+  handleOpencodeEvent({
+    type: "message.part.updated",
+    sessionID: "ses_demo",
+    part: {
+      type: "reasoning",
+      text: "Thinking through the next step",
+    },
+  }, state);
+  handleOpencodeEvent({
+    type: "message.part.updated",
+    sessionID: "ses_demo",
+    part: {
+      type: "tool_result",
+      id: "tool_1",
+      name: "read_file",
+      result: { output: "done" },
+    },
+  }, state);
+
+  expect(statuses).toEqual(["planning"]);
+  expect(emitted).toEqual([
+    { type: "status", content: "planning" },
+    { type: "thinking_delta", content: "Thinking through the next step" },
+    { type: "tool_finish", id: "tool_1", ok: true, output_preview: "{\"output\":\"done\"}" },
+  ]);
 });

@@ -48,3 +48,9 @@ test("OpenCode export text parses into assistant/user messages and blocks", () =
     { type: "text", text: "hi" },
   ]);
 });
+
+test("OpenCode parsers handle invalid or missing session data safely", () => {
+  expect(_internal.parseSessionList("not json", "/tmp/project")).toEqual([]);
+  expect(_internal.parseExport("no export payload here")).toBeNull();
+  expect(_internal.parseMessages([{ info: { role: "system" }, parts: [{ type: "text", text: "ignored" }] }])).toEqual([]);
+});

@@ -1286,7 +1286,9 @@ export async function createServer(port: number) {
         session: providerSessionId
           ? requestProvider === "claude"
             ? getClaudeSession(workspace.cwd, providerSessionId)
-            : getCodexSession(workspace.cwd, providerSessionId)
+            : requestProvider === "opencode"
+              ? getOpencodeSession(workspace.cwd, providerSessionId)
+              : getCodexSession(workspace.cwd, providerSessionId)
           : null,
       });
     } catch (err) {

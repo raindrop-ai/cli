@@ -4,6 +4,7 @@ import claudeCodeLogo from "../assets/claude-code-logo.png";
 import codexLogo from "../assets/codex-logo.svg";
 import { useWorkshopEvent } from "../hooks/use-workshop-ws";
 import { AGENT_PROVIDER_IDS, isAgentProvider, providerLabel, type AgentProviderId } from "../utils/agent-provider";
+import { resumeCommandForSession } from "../utils/agent-session-command";
 import { ConnectionIndicator } from "./ConnectionIndicator";
 import { Markdown } from "./Markdown";
 import { RaindropLogo } from "./RaindropLogo";
@@ -1547,23 +1548,6 @@ function ChatPreviewItem({
 function formatCwdDisplay(cwd: string | null): string {
   if (!cwd) return "Working directory unavailable";
   return cwd.replace(/^\/Users\/[^/]+(?=\/|$)/, "~");
-}
-
-function resumeCommandForSession(session: ClaudeSessionSummary, workspaceCwd: string | null, provider: AgentProviderId = "claude"): string {
-  const cwd = session.cwd ?? workspaceCwd;
-  const resume =
-    provider === "codex"
-      ? `codex resume ${session.id}`
-      : provider === "opencode"
-        ? `opencode run --session ${session.id}`
-        : `claude --resume ${session.id}`;
-  return cwd
-    ? `cd ${shellQuote(cwd)} && ${resume}`
-    : resume;
-}
-
-function shellQuote(value: string): string {
-  return `'${value.replace(/'/g, "'\\''")}'`;
 }
 
 function copyTextWithTextarea(text: string): boolean {
