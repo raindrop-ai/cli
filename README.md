@@ -10,7 +10,7 @@ codebase, and fix what's broken.
 ## Install
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/raindrop-ai/workshop/main/install.sh | bash
+curl -fsSL https://raindrop.sh/install | bash
 ```
 
 ## Build from source
