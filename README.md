@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="./docs/assets/workshop-hero.png" alt="Workshop: the local debugger your agent is missing." width="100%">
+</p>
+
 # Raindrop Workshop
 
 **The local debugger your agent is missing.** Watch your agent think locally,
