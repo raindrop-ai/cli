@@ -209,8 +209,15 @@ async function cmdStart(): Promise<number> {
   }
 }
 
-async function cmdStop(): Promise<number> {
-  const pid = readPid();
+async function cmdStop(portHint?: number): Promise<number> {
+  let pid = readPid();
+  if (!pid) {
+    const port = portHint ?? readPort();
+    const health = port ? await getWorkshopHealth(port) : null;
+    if (typeof health?.pid === "number" && processAlive(health.pid)) {
+      pid = health.pid;
+    }
+  }
   if (!pid) {
     const startup = stopWorkshopStartup();
     console.log(startup.ok && !startup.skipped ? startup.message : "workshop not running (no pid file)");
@@ -272,10 +279,14 @@ This deletes local Workshop traces and saved data after confirmation.
   }
   if (selection.alreadyRunning) {
     console.error(`workshop is running on :${selection.port}, stopping it first…`);
-    const stopCode = await cmdStop();
+    const stopCode = await cmdStop(selection.port);
     if (stopCode !== 0) {
       console.error("failed to stop workshop; aborting reset");
       return stopCode;
+    }
+    if (await isHealthy(selection.port)) {
+      console.error(`workshop is still running on :${selection.port}; aborting reset`);
+      return 1;
     }
   }
 
@@ -557,17 +568,21 @@ function processAlive(pid: number): boolean {
   }
 }
 
-async function isHealthy(port: number): Promise<boolean> {
+async function getWorkshopHealth(port: number): Promise<{ service?: string; pid?: number } | null> {
   try {
     const res = await fetch(`http://127.0.0.1:${port}/health`, {
       signal: AbortSignal.timeout(500),
     });
-    if (!res.ok) return false;
-    const body = await res.json() as { service?: string };
-    return body.service === "workshop";
+    if (!res.ok) return null;
+    const body = await res.json() as { service?: string; pid?: number };
+    return body.service === "workshop" ? body : null;
   } catch {
-    return false;
+    return null;
   }
+}
+
+async function isHealthy(port: number): Promise<boolean> {
+  return Boolean(await getWorkshopHealth(port));
 }
 
 async function activateWorkspace(port: number, cwd: string): Promise<void> {

@@ -60,9 +60,6 @@ note "preserved: $HOME/.raindrop/raindrop_workshop.db*"
 step "installing repo deps"
 bun install
 
-step "installing UI deps"
-( cd "$REPO_ROOT/app" && bun install )
-
 step "rebuilding + installing local raindrop binary"
 bun install:local
 

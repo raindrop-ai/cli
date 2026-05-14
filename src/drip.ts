@@ -15,6 +15,7 @@ interface DripItem {
   matrix?: readonly string[];
   displayWidth?: number;
   displayHeight?: number;
+  fillGaps?: boolean;
 }
 
 const h = React.createElement;
@@ -113,8 +114,9 @@ const ITEMS: DripItem[] = [
     label: "raindrop field cap",
     remaining: 200,
     matrix: CAP_MATRIX,
-    displayWidth: 25,
-    displayHeight: 13,
+    displayWidth: 30,
+    displayHeight: 14,
+    fillGaps: true,
   },
   {
     id: "umbrella",
@@ -433,6 +435,7 @@ function ItemCard({
   const borderColor = selected ? "whiteBright" : "gray";
   const titleColor = selected ? "whiteBright" : "gray";
   const displayMatrix = resampleMatrix(item.matrix!, item.displayWidth!, item.displayHeight!);
+  const artMatrix = item.fillGaps ? shadeCapMatrix(removeCapStrays(fillMatrixGaps(displayMatrix))) : displayMatrix;
 
   return h(
     Box,
@@ -460,7 +463,7 @@ function ItemCard({
       ),
     ),
     h(Box, { height: 2 }),
-    h(DotMatrixArt, { matrix: displayMatrix }),
+    h(DotMatrixArt, { matrix: artMatrix }),
     h(Box, { flexGrow: 1 }),
     h(Text, { color: selected ? "whiteBright" : "gray" }, selected ? "enter to claim" : "              "),
   );
@@ -575,6 +578,106 @@ function resampleMatrix(matrix: readonly string[], targetWidth: number, targetHe
   }
 
   return rows;
+}
+
+function fillMatrixGaps(matrix: readonly string[]): string[] {
+  const width = matrixWidth(matrix);
+  const padded = matrix.map((row) => row.padEnd(width));
+  return padded.map((row, y) => {
+    let next = "";
+    for (let x = 0; x < width; x++) {
+      const current = sourceTone(row[x]);
+      if (current > 0) {
+        next += row[x];
+        continue;
+      }
+
+      const left = sourceTone(row[x - 1] ?? " ");
+      const right = sourceTone(row[x + 1] ?? " ");
+      const up = sourceTone(padded[y - 1]?.[x] ?? " ");
+      const down = sourceTone(padded[y + 1]?.[x] ?? " ");
+      const diagonalHits = [
+        padded[y - 1]?.[x - 1],
+        padded[y - 1]?.[x + 1],
+        padded[y + 1]?.[x - 1],
+        padded[y + 1]?.[x + 1],
+      ].filter((shade) => sourceTone(shade ?? " ") > 0).length;
+
+      if ((left > 0 && right > 0) || (up > 0 && down > 0) || (diagonalHits >= 3 && left + right + up + down > 0)) {
+        const neighborAverage = [left, right, up, down].filter((tone) => tone > 0).reduce((sum, tone, _, tones) => sum + tone / tones.length, 0);
+        next += encodeTone(Math.max(MIN_VISIBLE_SOURCE_TONE, neighborAverage * 0.85));
+      } else {
+        next += " ";
+      }
+    }
+    return next.replace(/\s+$/g, "");
+  });
+}
+
+function shadeCapMatrix(matrix: readonly string[]): string[] {
+  const width = matrixWidth(matrix);
+  const height = matrix.length;
+  const padded = matrix.map((row) => row.padEnd(width));
+
+  return padded.map((row, y) => {
+    let next = "";
+    const yNorm = height <= 1 ? 0 : y / (height - 1);
+    for (let x = 0; x < width; x++) {
+      const current = sourceTone(row[x]);
+      if (current <= 0) {
+        next += " ";
+        continue;
+      }
+
+      const xNorm = width <= 1 ? 0 : x / (width - 1);
+      const crownHighlight = Math.max(0, 1 - Math.hypot((xNorm - 0.4) / 0.34, (yNorm - 0.28) / 0.36)) * 18;
+      const frontBrimHighlight = yNorm > 0.54 ? Math.max(0, 1 - xNorm / 0.72) * 18 : 0;
+      const seamX = (xNorm - 0.38) / 0.7;
+      const seamY = 0.68 - Math.pow(seamX, 2) * 0.16 - xNorm * 0.015;
+      const brimSeamHighlight = Math.abs(yNorm - seamY) < 0.032 && xNorm > 0.07 && xNorm < 0.76
+        ? 34 * (1 - Math.max(0, xNorm - 0.52) / 0.24)
+        : 0;
+      const leftFalloff = (1 - xNorm) * 28;
+      const rightPanelShadow = xNorm > 0.52 ? (xNorm - 0.52) * 110 : 0;
+      const farRightEdgeShadow = xNorm > 0.74 ? (xNorm - 0.74) * 170 : 0;
+      const lowerRightShadow = yNorm > 0.58 && xNorm > 0.46 ? 13 : 0;
+      const topSoftening = yNorm < 0.12 ? 8 : 0;
+      const tone = current * 0.45 + 9 + leftFalloff + crownHighlight + frontBrimHighlight + brimSeamHighlight - rightPanelShadow - farRightEdgeShadow - lowerRightShadow - topSoftening;
+      next += encodeTone(tone);
+    }
+    return next.replace(/\s+$/g, "");
+  });
+}
+
+function removeCapStrays(matrix: readonly string[]): string[] {
+  const width = matrixWidth(matrix);
+  const height = matrix.length;
+  const padded = matrix.map((row) => row.padEnd(width));
+  return padded.map((row, y) => {
+    let next = "";
+    const yNorm = height <= 1 ? 0 : y / (height - 1);
+    for (let x = 0; x < width; x++) {
+      const current = sourceTone(row[x]);
+      if (current <= 0) {
+        next += " ";
+        continue;
+      }
+      const xNorm = width <= 1 ? 0 : x / (width - 1);
+      const neighbors = [
+        padded[y - 1]?.[x - 1], padded[y - 1]?.[x], padded[y - 1]?.[x + 1],
+        row[x - 1], row[x + 1],
+        padded[y + 1]?.[x - 1], padded[y + 1]?.[x], padded[y + 1]?.[x + 1],
+      ].filter((shade) => sourceTone(shade ?? " ") > 0).length;
+      const lowerLeftSpeck =
+        yNorm > 0.52 &&
+        xNorm < 0.26 &&
+        sourceTone(row[x - 1] ?? " ") === 0 &&
+        sourceTone(row[x + 1] ?? " ") === 0 &&
+        sourceTone(padded[y + 1]?.[x] ?? " ") === 0;
+      next += (yNorm > 0.58 && xNorm < 0.2 && neighbors <= 1) || lowerLeftSpeck ? " " : row[x];
+    }
+    return next.replace(/\s+$/g, "");
+  });
 }
 
 function sourceTone(shade: string): number {

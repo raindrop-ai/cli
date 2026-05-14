@@ -28,6 +28,7 @@ Use this skill for the workflow and Workshop-specific judgment. Use the docs and
 - Instrument one real agent entry point first. If several are plausible, ask which one should appear in Workshop.
 - First get a minimal useful run into Workshop, then enrich it. Do not trace every helper/tool/sub-agent before Phase 1 works.
 - Respect existing telemetry ownership. If the repo already initializes OpenTelemetry, Sentry, Datadog, Honeycomb, Traceloop, LangSmith, or another provider, do not create a competing provider.
+- Updating the matching Raindrop SDK/integration to the latest available version is mandatory before instrumentation edits. Do not proceed on an older installed SDK just because it is already present.
 - Prefer installed package docs/types over memory. If an API is not present in the installed package, do not use it.
 - Verification is required. Success means Workshop shows a useful run, not just that dependencies installed.
 
@@ -73,7 +74,7 @@ Goal: prove the local trace path works with the smallest top-level instrumentati
 
 Make the smallest change:
 
-- Install the matching Raindrop SDK/integration if missing.
+- Install or update the matching Raindrop SDK/integration to the latest available version using the repo's package manager, then inspect the installed README/types before coding.
 - Point the app at local Workshop, usually with `RAINDROP_LOCAL_DEBUGGER=http://localhost:5899/v1/`.
 - Add minimal instrumentation to one real entry point: wrapper call metadata, or `begin` before the invocation and `finish` after final output/error.
 - Run one representative invocation.
@@ -116,7 +117,7 @@ Always consult docs first, then use the notes below to decide.
 
 Docs: `https://raindrop.ai/docs/sdk/typescript`
 
-Hard version gate: require `raindrop-ai >= 0.0.90` for TypeScript/JavaScript core SDK instrumentation. If the installed package is `0.0.89` or older, do not proceed with this path; upgrade first or stop and report the version mismatch.
+Hard version gate: require the latest available `raindrop-ai` package for TypeScript/JavaScript core SDK instrumentation, and never lower than `0.0.90`. If the repo has an older installed package, update first or stop and report the version mismatch.
 
 Use for custom TypeScript/Node agents and direct provider SDK calls. The core shape is:
 
@@ -183,7 +184,7 @@ Use `raindrop-ai`. For Phase 1, prefer `raindrop.begin(...)` before the custom l
 
 For Python custom loops:
 
-- Check Python and `raindrop-ai` versions first. Current docs may require a newer Python/package than the repo has installed.
+- Check Python and `raindrop-ai` versions first, then update `raindrop-ai` to the latest available version before editing instrumentation.
 - Do not use `track_ai` as a Workshop Phase 1 path. If the installed package only exposes `track_ai`, stop and report that this package version cannot produce a visible Workshop run with the current local ingestion behavior.
 - Phase 1: wrap the whole model/tool loop with `begin`/`finish`.
 - Phase 2: preserve loop behavior and add instrumentation at real boundaries: provider call and tool function execution.
@@ -254,4 +255,3 @@ Needs user run:
 Blocked:
 
 > I stopped before guessing. `<specific ambiguity/failure>`. The next step is `<specific user choice or docs/team handoff if nothing truly works (try your hardest before doing this. For Team handoff, report diagnostics, code skeleton without revealing too much about user's proprietary code)>`.
-

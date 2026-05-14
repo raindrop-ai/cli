@@ -91,10 +91,6 @@ function run(cmd: string, args: string[], cwd: string = REPO_ROOT): void {
 
 function buildUi(): void {
   console.log("[build-bun] building UI (vite)…");
-  if (!existsSync(path.join(APP_DIR, "node_modules"))) {
-    console.log("[build-bun] installing UI deps…");
-    run("bun", ["install"], APP_DIR);
-  }
   run("bun", ["x", "vite", "build"], APP_DIR);
   if (!existsSync(path.join(APP_DIST, "index.html"))) {
     throw new Error(`Expected ${APP_DIST}/index.html after vite build`);

@@ -478,7 +478,7 @@ export async function createServer(port: number) {
 
   // Health check endpoint — used by SDKs to auto-detect a running debugger
   app.get("/health", (_req, res) => {
-    res.json({ ok: true, service: "workshop", port });
+    res.json({ ok: true, service: "workshop", port, pid: process.pid });
   });
 
   app.get("/demo-chat", (_req, res) => {
