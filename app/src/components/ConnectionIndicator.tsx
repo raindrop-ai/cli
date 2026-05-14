@@ -84,7 +84,7 @@ export function ConnectionIndicator({ cwd = null, provider = "claude" }: { cwd?:
   const installer =
     "curl -fsSL https://raw.githubusercontent.com/raindrop-ai/cli/main/install.sh | bash";
   const mcpAddCommand = provider === "opencode"
-    ? '{ "$schema": "https://opencode.ai/config.json", "mcp": { "raindrop": { "type": "local", "command": ["bun", "/path/to/workshop/src/index.ts", "workshop", "mcp"] } } }'
+    ? '{ "$schema": "https://opencode.ai/config.json", "mcp": { "raindrop": { "type": "local", "command": ["bun", "/absolute/path/to/workshop/src/index.ts", "workshop", "mcp"] } } }'
     : "claude mcp add raindrop -- bun /path/to/workshop/src/index.ts workshop mcp";
   const dir = status.state === "green" ? cwdLabel(cwd) : "";
   const statusContent = (
