@@ -1,10 +1,11 @@
 import { spawn } from "child_process";
 import React, { useEffect, useState } from "react";
-import { Box, Text, render, useApp, useInput } from "ink";
+import { Box, Text, render, useApp, useInput, type Key } from "ink";
 import {
   cancel,
   outro,
 } from "@clack/prompts";
+import { VERSION } from "./version";
 
 export type DripItemId = "hat" | "umbrella" | "sticker";
 
@@ -21,6 +22,7 @@ interface DripItem {
 const h = React.createElement;
 const GITHUB_REPO = "invisible-tools/raindrop-workshop";
 const GITHUB_URL = `https://github.com/${GITHUB_REPO}`;
+const DEFAULT_DRIP_CLAIM_URL = "https://www.raindrop.ai/api/drip-claims";
 const CARD_WIDTH = 46;
 const CARD_HEIGHT = 24;
 const STICKER_BOX_HEIGHT = CARD_HEIGHT;
@@ -145,11 +147,15 @@ WHAT IT DOES
       umbrella     50 remaining
       sticker     500 remaining
 
-    This first pass is UI-only. Backend reservation and shipping form wiring
-    will be added separately.
+    After you choose an item, the CLI asks for your email and submits a claim
+    while supplies last. Shipping details are collected separately.
 
 OPTIONS
     -h, --help    Print this help.
+    --email EMAIL Submit a claim without an interactive email prompt.
+
+ENVIRONMENT
+    RAINDROP_DRIP_CLAIM_URL Override the claim endpoint for testing.
 `);
 }
 
@@ -182,6 +188,27 @@ interface GhStarResult {
   reason?: string;
 }
 
+interface DripClaimSuccess {
+  ok: true;
+  status: "created";
+  claimId?: string;
+  item?: DripItemId;
+  remaining?: number | null;
+  createdAt?: string;
+}
+
+interface DripClaimFailure {
+  ok: false;
+  status: string;
+  error: string;
+  claimId?: string;
+  item?: DripItemId;
+  remaining?: number | null;
+  createdAt?: string;
+}
+
+type DripClaimResult = DripClaimSuccess | DripClaimFailure;
+
 async function starWithGh(): Promise<GhStarResult> {
   return new Promise((resolve) => {
     const child = spawn("gh", ["api", "-X", "PUT", `/user/starred/${GITHUB_REPO}`], {
@@ -203,6 +230,170 @@ async function starWithGh(): Promise<GhStarResult> {
       });
     });
   });
+}
+
+async function completeGitHubStar(method: "api" | "browser"): Promise<"api" | "browser"> {
+  if (method === "api") {
+    const starred = await starWithGh();
+    if (starred.ok) return "api";
+
+    if (isDevMode()) {
+      console.log(`gh repo star failed: ${starred.reason}`);
+      console.log("Opening GitHub in the browser instead.");
+    }
+    openInBrowser(GITHUB_URL);
+    return "browser";
+  }
+
+  openInBrowser(GITHUB_URL);
+  return "browser";
+}
+
+function isValidEmail(value: string): boolean {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
+}
+
+function normalizeEmailArg(emailArg?: string): string | null | undefined {
+  if (emailArg !== undefined) {
+    const email = emailArg.trim();
+    if (!isValidEmail(email)) {
+      console.error("invalid email: expected something like you@example.com");
+      return null;
+    }
+    return email;
+  }
+  return undefined;
+}
+
+function coerceItemId(value: unknown): DripItemId | undefined {
+  return value === "hat" || value === "umbrella" || value === "sticker" ? value : undefined;
+}
+
+async function submitDripClaim(input: {
+  email: string;
+  item: DripItemId;
+  starMethod: "api" | "browser";
+}): Promise<DripClaimResult> {
+  const url = process.env.RAINDROP_DRIP_CLAIM_URL ?? DEFAULT_DRIP_CLAIM_URL;
+  let response: Response;
+
+  try {
+    response = await fetch(url, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "user-agent": `raindrop-cli/${VERSION}`,
+      },
+      body: JSON.stringify({
+        email: input.email,
+        item: input.item,
+        star_method: input.starMethod,
+        cli_version: VERSION,
+        platform: `${process.platform}-${process.arch}`,
+      }),
+    });
+  } catch (err) {
+    return {
+      ok: false,
+      status: "network_error",
+      error: (err as Error).message,
+    };
+  }
+
+  const raw = await response.json().catch(() => null) as {
+    claim?: {
+      id?: string;
+      status?: string;
+      item?: unknown;
+      remaining?: number | null;
+      created_at?: string;
+    };
+    status?: string;
+    error?: string;
+    claim_id?: string;
+    item?: unknown;
+    remaining?: number | null;
+    created_at?: string;
+  } | null;
+
+  if (response.ok && raw?.claim?.status === "created") {
+    return {
+      ok: true,
+      status: "created",
+      claimId: raw.claim.id,
+      item: coerceItemId(raw.claim.item),
+      remaining: raw.claim.remaining,
+      createdAt: raw.claim.created_at,
+    };
+  }
+
+  return {
+    ok: false,
+    status: raw?.status ?? `http_${response.status}`,
+    error: raw?.error ?? `Claim API returned HTTP ${response.status}`,
+    claimId: raw?.claim_id,
+    item: coerceItemId(raw?.item),
+    remaining: raw?.remaining,
+    createdAt: raw?.created_at,
+  };
+}
+
+function itemLabel(item: DripItemId): string {
+  return ITEMS.find((entry) => entry.id === item)?.label ?? item;
+}
+
+function printClaimResult(result: DripClaimResult, selection: DripSelection, email: string): number {
+  const item = result.item ?? selection.item;
+  if (result.ok) {
+    console.log(`Claim reserved for ${email}: ${itemLabel(item)}.`);
+    outro("We'll follow up by email for shipping details.");
+    return 0;
+  }
+
+  if (result.status === "duplicate") {
+    console.log(`${email} has already claimed ${itemLabel(item)}.`);
+    outro("You're on the claim list. We'll follow up by email for shipping details.");
+    return 0;
+  }
+
+  if (result.status === "sold_out") {
+    console.error(`${itemLabel(item)} is sold out.`);
+    return 1;
+  }
+
+  console.error(`Claim failed: ${result.error}`);
+  return 1;
+}
+
+interface DripArgs {
+  email?: string;
+}
+
+function parseDripArgs(args: string[]): DripArgs | number {
+  const parsed: DripArgs = {};
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
+    if (arg === "--help" || arg === "-h") {
+      printHelp();
+      return 0;
+    }
+    if (arg === "--email") {
+      const email = args[++i];
+      if (!email) {
+        console.error("missing value for --email");
+        return 64;
+      }
+      parsed.email = email;
+      continue;
+    }
+    if (arg.startsWith("--email=")) {
+      parsed.email = arg.slice("--email=".length);
+      continue;
+    }
+    console.error(`unknown flag: ${arg}`);
+    return 64;
+  }
+  return parsed;
 }
 
 function isDevMode(): boolean {
@@ -232,20 +423,25 @@ function StaticFallback(): React.ReactElement {
 interface DripSelection {
   item: DripItemId;
   starMethod: "api" | "browser";
+  email?: string;
 }
 
 function DripApp({
+  emailArg,
   onDone,
   onCancel,
 }: {
+  emailArg?: string;
   onDone: (selection: DripSelection) => void;
   onCancel: () => void;
 }): React.ReactElement {
   const app = useApp();
   const [selected, setSelected] = useState(0);
-  const [step, setStep] = useState<"item" | "star">("item");
+  const [step, setStep] = useState<"item" | "star" | "email">("item");
   const [starMethod, setStarMethod] = useState<"api" | "browser">("api");
   const [starPromptArmed, setStarPromptArmed] = useState(false);
+  const [email, setEmail] = useState("");
+  const [emailError, setEmailError] = useState<string | null>(null);
   const [frame, setFrame] = useState(0);
 
   useEffect(() => {
@@ -262,22 +458,44 @@ function DripApp({
     return () => clearTimeout(timer);
   }, [step]);
 
-  useInput((input, key) => {
-    if (key.escape || key.ctrl || input === "q") {
+  useInput((input: string, key: Key) => {
+    if (key.escape || key.ctrl || (step !== "email" && input === "q")) {
       onCancel();
       app.exit();
     } else if (step === "item") {
-      if (key.leftArrow || input === "h") setSelected((current) => (current + ITEMS.length - 1) % ITEMS.length);
-      else if (key.rightArrow || input === "l") setSelected((current) => (current + 1) % ITEMS.length);
+      if (key.leftArrow || input === "h") setSelected((current: number) => (current + ITEMS.length - 1) % ITEMS.length);
+      else if (key.rightArrow || input === "l") setSelected((current: number) => (current + 1) % ITEMS.length);
       else if (key.return) setStep("star");
     } else if (step === "star") {
       if (!starPromptArmed) return;
       if (key.leftArrow || input === "h" || key.rightArrow || input === "l") {
-        setStarMethod((current) => current === "api" ? "browser" : "api");
+        setStarMethod((current: "api" | "browser") => current === "api" ? "browser" : "api");
       }
       else if (key.return) {
-        onDone({ item: ITEMS[selected].id, starMethod });
-        app.exit();
+        if (emailArg) {
+          onDone({ item: ITEMS[selected].id, starMethod, email: emailArg });
+          app.exit();
+        } else {
+          setStep("email");
+        }
+      }
+    } else if (step === "email") {
+      if (key.return) {
+        const trimmed = email.trim();
+        if (!trimmed) {
+          setEmailError("Email is required");
+        } else if (!isValidEmail(trimmed)) {
+          setEmailError("Enter a valid email");
+        } else {
+          onDone({ item: ITEMS[selected].id, starMethod, email: trimmed });
+          app.exit();
+        }
+      } else if (key.backspace || key.delete) {
+        setEmail((current: string) => current.slice(0, -1));
+        setEmailError(null);
+      } else if (input) {
+        setEmail((current: string) => current + input.replace(/[\r\n]/g, ""));
+        setEmailError(null);
       }
     }
   });
@@ -317,6 +535,33 @@ function DripApp({
       h(Text, null, " to quit"),
     ),
     step === "star" && h(StarPrompt, { item, starMethod }),
+    step === "email" && h(EmailPrompt, { item, email, emailError }),
+  );
+}
+
+function EmailPrompt({
+  item,
+  email,
+  emailError,
+}: {
+  item: DripItem;
+  email: string;
+  emailError: string | null;
+}): React.ReactElement {
+  return h(
+    Box,
+    { flexDirection: "column", marginTop: 1 },
+    h(Text, null, `${item.label} selected`),
+    h(Box, { height: 1 }),
+    h(Text, null, "Email for claim updates"),
+    h(
+      Text,
+      null,
+      h(Text, { color: "green" }, "> "),
+      h(Text, null, email || "you@example.com"),
+      h(Text, { color: "whiteBright" }, email ? "█" : ""),
+    ),
+    emailError && h(Text, { color: "red" }, emailError),
   );
 }
 
@@ -684,14 +929,15 @@ function sourceTone(shade: string): number {
   return decodeTone(shade);
 }
 
-async function chooseDripItem(): Promise<DripSelection | null> {
+async function chooseDripItem(emailArg?: string): Promise<DripSelection | null> {
   if (!process.stdin.isTTY || !process.stdout.isTTY) {
     render(h(StaticFallback));
-    return { item: "hat", starMethod: "browser" };
+    return { item: "hat", starMethod: "browser", email: emailArg };
   }
 
   let result: DripSelection | null = null;
   const instance = render(h(DripApp, {
+    emailArg,
     onDone: (selection: DripSelection) => {
       result = selection;
     },
@@ -712,35 +958,23 @@ umbrella       50 left`;
 }
 
 export async function cmdDrip(args: string[]): Promise<number> {
-  for (const arg of args) {
-    if (arg === "--help" || arg === "-h") {
-      printHelp();
-      return 0;
-    }
-    console.error(`unknown flag: ${arg}`);
+  const parsed = parseDripArgs(args);
+  if (typeof parsed === "number") return parsed;
+  const emailArg = normalizeEmailArg(parsed.email);
+  if (emailArg === null) return 64;
+
+  const selection = await chooseDripItem(emailArg);
+  if (!selection) return abort();
+  if (!selection.email) {
+    console.error("email is required to claim drip; rerun in a terminal or pass --email EMAIL.");
     return 64;
   }
 
-  const selection = await chooseDripItem();
-  if (!selection) return abort();
-
-  if (selection.starMethod === "api") {
-    const starred = await starWithGh();
-    if (starred.ok) {
-      console.log(`Starred ${GITHUB_REPO} via API.`);
-    } else {
-      if (isDevMode()) {
-        console.log(`gh repo star failed: ${starred.reason}`);
-        console.log("Opening GitHub in the browser instead.");
-      }
-      openInBrowser(GITHUB_URL);
-      console.log(`Opened ${GITHUB_URL}`);
-    }
-  } else {
-    openInBrowser(GITHUB_URL);
-    console.log(`Opened ${GITHUB_URL}`);
-  }
-
-  outro("Next: name, email, signup preference, and shipping info.");
-  return 0;
+  const starMethod = await completeGitHubStar(selection.starMethod);
+  const claim = await submitDripClaim({
+    email: selection.email,
+    item: selection.item,
+    starMethod,
+  });
+  return printClaimResult(claim, selection, selection.email);
 }
