@@ -175,7 +175,7 @@ export function parseOtlpRequest(body: any): ParsedSpan[] {
         }
 
         const model = first(attrs, "ai.model.id", "ai.response.model", "gen_ai.request.model", "llm.request.model") as string | undefined;
-        const provider = first(attrs, "ai.model.provider", "gen_ai.system", "llm.system") as string | undefined;
+        const provider = first(attrs, "ai.model.provider", "gen_ai.system", "gen_ai.provider.name", "llm.system") as string | undefined;
         const inputTokens = first(attrs, "ai.usage.inputTokens", "ai.usage.promptTokens", "ai.usage.prompt_tokens", "gen_ai.usage.input_tokens") as number | undefined;
         const outputTokens = first(attrs, "ai.usage.outputTokens", "ai.usage.completionTokens", "ai.usage.completion_tokens", "gen_ai.usage.output_tokens") as number | undefined;
 
