@@ -56,6 +56,7 @@ function inferSpanType(
   if (traceloopKind === "tool") return "TOOL_CALL";
   if (traceloopKind === "llm") return "LLM_GENERATION";
   if (isGenAiInferenceSpan(attrs)) return "LLM_GENERATION";
+  if (typeof attrs["lk.chat_ctx"] === "string" && typeof attrs["gen_ai.request.model"] === "string") return "LLM_GENERATION";
   if (typeof operationId === "string") {
     if (operationId === "ai.toolCall") return "TOOL_CALL";
     if (operationId === "chat" || operationId === "llm" || operationId === "generation" || operationId === "response") return "LLM_GENERATION";
@@ -139,7 +140,7 @@ export function parseOtlpRequest(body: any): ParsedSpan[] {
         const operationId = getAttr(attrs, "ai.operationId") as string | undefined;
         const traceloopKind = getAttr(attrs, "traceloop.span.kind") as string | undefined;
         const raindropSpanKind = getAttr(attrs, "raindrop.span.kind") as string | undefined;
-        const toolCallName = first(attrs, "ai.toolCall.name", "tool.name") as string | undefined;
+        const toolCallName = first(attrs, "ai.toolCall.name", "tool.name", "lk.function_tool.name") as string | undefined;
         const spanType = inferSpanType(operationId, traceloopKind, !!toolCallName, raindropSpanKind, allAttrs);
 
         // For tool calls, prefer the actual tool name over generic wrapper
@@ -174,7 +175,7 @@ export function parseOtlpRequest(body: any): ParsedSpan[] {
         }
 
         const model = first(attrs, "ai.model.id", "ai.response.model", "gen_ai.request.model", "llm.request.model") as string | undefined;
-        const provider = first(attrs, "ai.model.provider", "gen_ai.system", "llm.system") as string | undefined;
+        const provider = first(attrs, "ai.model.provider", "gen_ai.system", "gen_ai.provider.name", "llm.system") as string | undefined;
         const inputTokens = first(attrs, "ai.usage.inputTokens", "ai.usage.promptTokens", "ai.usage.prompt_tokens", "gen_ai.usage.input_tokens") as number | undefined;
         const outputTokens = first(attrs, "ai.usage.outputTokens", "ai.usage.completionTokens", "ai.usage.completion_tokens", "gen_ai.usage.output_tokens") as number | undefined;
 
