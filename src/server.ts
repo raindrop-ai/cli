@@ -7,6 +7,7 @@ import path from "path";
 import { randomUUID } from "crypto";
 import { normalizeOtelId } from "./ids";
 import { parseOtlpRequest } from "./parse";
+import { decodeOtlpProtobuf } from "./otlp-protobuf";
 import { upsertRun, insertSpan, upsertEventSpan, findRunByEventId, adoptRunByEventId, getRuns, getRunWithSpans, getRunsByConvoId, clearAll, upsertLiveEvent, getLiveEvents, cacheSavedRun, getCachedRun, deleteCachedRun, deleteRun, getSpanMeta, getSpanById, getSpanPayloadColumn, getSpanContext, getMostRecentlyTouchedRun, getRunById, getRunOutline, listSpansFiltered, searchRun, tailLiveEvents, listSavedEvents, getSavedEvent, upsertSavedEvent, patchSavedEvent, deleteSavedEvent, listSavedFolders, ensureSavedFolder, deleteSavedFolder, queryTraces, type SavedEventRow } from "./db";
 import { sliceSpanPayload } from "./payload-slice";
 import { detectSubAgents } from "./agents";
@@ -502,13 +503,17 @@ export async function createServer(port: number) {
   // Shared OTLP trace ingestion handler
   function ingestTraces(req: any, res: any) {
     try {
-      // If body is a Buffer (protobuf), we can't parse it yet — acknowledge but skip
-      if (Buffer.isBuffer(req.body)) {
-        console.warn("[workshop] Received protobuf OTLP export — set OTEL_EXPORTER_OTLP_PROTOCOL=http/json for local debugging");
-        res.json({ ok: true, spansIngested: 0, warning: "protobuf not supported, use http/json" });
-        return;
+      let body = req.body;
+      if (Buffer.isBuffer(body)) {
+        try {
+          body = decodeOtlpProtobuf(body);
+        } catch (err) {
+          console.error("[workshop] Failed to decode protobuf OTLP:", err);
+          res.status(400).json({ error: "Failed to decode protobuf OTLP body" });
+          return;
+        }
       }
-      const spans = parseOtlpRequest(req.body);
+      const spans = parseOtlpRequest(body);
       if (spans.length === 0) { res.json({ ok: true, spansIngested: 0 }); return; }
 
       const byTrace = new Map<string, typeof spans>();
